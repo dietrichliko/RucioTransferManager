@@ -1,0 +1,10 @@
+# Custom Dictionary Words
+dasgoclient
+dids
+eospublic
+mngr
+nevents
+opendata
+rucio
+sqlalchemy
+xrdadler

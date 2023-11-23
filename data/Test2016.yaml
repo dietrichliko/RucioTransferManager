@@ -1,0 +1,6 @@
+---
+site: T3_CH_CERN_OpenData
+datasets:
+  - /BTagCSV/Run2016G-UL2016_MiniAODv2-v1/MINIAOD
+  - /BTagMu/Run2016G-UL2016_MiniAODv2-v1/MINIAOD
+  - /Tau/Run2016H-UL2016_MiniAODv2_NanoAODv9-v1/NANOAOD

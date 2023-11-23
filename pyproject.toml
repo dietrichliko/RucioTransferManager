@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "rtm"
+version = "0.1.0"
+description = ""
+authors = ["Dietrich Liko <Dietrich.Liko@oeaw.ac.at>"]
+readme = "README.md"
+packages = [{include = "rtm", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+sqlalchemy = "^2.0.23"
+pyyaml = "^6.0.1"
+click = "^8.1.7"
+click-loglevel = "^0.5.0"
+rucio-clients = "^32.5.1"
+sqlalchemy-state-machine = "^1.10.0"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.11.0"
+ruff = "^0.1.5"
+mypy = "^1.7.0"
+types-pyyaml = "^6.0.12.12"
+sqlalchemy-stubs = "^0.4"
+
+[tool.poetry.scripts]
+rtm = "rtm.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
