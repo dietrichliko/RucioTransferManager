@@ -1,7 +1,7 @@
 db_url = "sqlite:///rtm.db"
 db_echo = false
-max_dasgoclient = 4
-max_xrdadler32 = 10
+max_dasgoclient = 10
+max_xrdadler32 = 20
 
 [voms-proxy]
 min_timeleft = 1000

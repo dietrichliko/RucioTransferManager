@@ -21,7 +21,7 @@ class Dataset(Base,StateMixin):
 
     state_config = StateConfig(
         initial=NEW,
-        states=[NEW, SUBSCRIBED, TRANSFERED, DONE],
+        states=[NEW, SUBSCRIBED, TRANSFERED, DONE, ERROR],
         transitions=[
             ["subscribe", NEW, SUBSCRIBED],
             ["transfered", SUBSCRIBED, TRANSFERED],
@@ -31,10 +31,10 @@ class Dataset(Base,StateMixin):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(sa.String, unique=True)
+    name: Mapped[str] = mapped_column(sa.String, unique=True, index=True)
     site: Mapped[str] = mapped_column(sa.String)
     subscription: Mapped[str] = mapped_column(sa.String, nullable=True)
-    files: Mapped[list["File"]] = relationship()
+    files: Mapped[list["File"]] = relationship(cascade='all, delete')
     status: Mapped[str] = mapped_column(sa.String, index=True)
     ok_cnt: Mapped[int] = mapped_column(sa.Integer)
     replicating_cnt: Mapped[int] = mapped_column(sa.Integer)

@@ -11,7 +11,9 @@ from sqlalchemy import Engine, create_engine, select
 from rtm import model
 from rtm import config
 
-from rucio.client import Client as RucioClient
+import rucio
+import rucio.client
+
 
 log = logging.getLogger(__name__)
 cfg = config.get()
@@ -29,14 +31,14 @@ class Manager:
     engine: Engine
     sem_dasgoclient: asyncio.Semaphore
     sem_xrdadler32: asyncio.Semaphore
-    client: RucioClient
+    client: rucio.client.Client
 
     def __init__(self) -> None:
         self.engine = create_engine(cfg.db_url, echo=cfg.db_echo)
         model.Base.metadata.create_all(self.engine)
         self.sem_dasgoclient = asyncio.Semaphore(cfg.max_dasgoclient)
         self.sem_xrdadler32 = asyncio.Semaphore(cfg.max_xrdadler32)
-        self.client = RucioClient(**cfg.rucio_client_args)
+        self.client = rucio.client.Client(**cfg.rucio_client_args)
 
     def list_datasets(self, pattern: str) -> None:
         if pattern:
@@ -47,9 +49,7 @@ class Manager:
         total_files = 0
         with Session(self.engine) as session:
             for dataset in session.scalars(stmt):
-                size = 0
-                for f in dataset.files:
-                    size += f.size
+                size = sum( f.size for f in dataset.files)
                 nr_files = len(dataset.files)
                 total_size += size
                 total_files += nr_files
@@ -75,11 +75,10 @@ class Manager:
             stmt = select(model.Dataset).filter(model.Dataset.status == "subscribed")
         with Session(self.engine) as session:
             for dataset in session.scalars(stmt):
-                print(dataset)
                 response = self.client.get_replication_rule(dataset.subscription)
                 if response["state"] == "OK":
                     dataset.transfered()
-            session.commit()
+                    session.commit()
 
     def verify(self, pattern: str) -> None:
         asyncio.run(self._verify(pattern))
@@ -142,18 +141,23 @@ class Manager:
             stmt = select(model.Dataset).filter(model.Dataset.status == "new")
         with Session(self.engine) as session:
             for dataset in session.scalars(stmt):
-                dids = [f"cms:{dataset.name}"]
+                dids = [{'scope': 'cms', 'name': dataset.name}]
                 rse_expression = f"{dataset.site}"
-
-                response = self.client.add_replication_rule(
-                    dids=dids,
-                    copies=1,
-                    rse_expression=rse_expression,
-                )
+                try:
+                    response = self.client.add_replication_rule(
+                        dids=dids,
+                        copies=1,
+                        rse_expression=rse_expression,
+                    )
+                except rucio.common.exception.RucioException as e:
+                    log.exception("Error creating replication rule for %s", dataset.name)
+                    dataset.error()
+                    continue
 
                 dataset.subscribe()
-                log.info("Subscribed %s", dataset)
-            session.commit()
+                dataset.subscription = response[0]
+                log.info("Subscribed %s", dataset.name)
+                session.commit()
 
     def add_datasets(self, datasets: list[str], site: str) -> None:
         asyncio.run(self._add_datasets(datasets, site))
@@ -177,6 +181,7 @@ class Manager:
                     stdout=asyncio.subprocess.PIPE,
                 )
                 stdout, stderr = await proc.communicate()
+                dataset_info = json.loads(stdout)
                 log.info("Creating %s", dataset)
                 d_obj = model.Dataset(
                     name=dataset,
@@ -203,7 +208,7 @@ class Manager:
                     d_obj.replicating_cnt = rules[0]['locks_replicating_cnt']
                     d_obj.stuck_cnt = rules[0]['locks_stuck_cnt']
                     d_obj.subscribe()
-                for info in json.loads(stdout):
+                for info in dataset_info:
                     for f in info["file"]:
                         f_obj = model.File(
                             dataset_id=d_obj.id,
@@ -214,6 +219,7 @@ class Manager:
                         )
 
                     session.add(f_obj)
+                session.commit()
 
         else:
             log.debug("Dataset %s already defined", dataset)
