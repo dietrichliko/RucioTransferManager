@@ -116,3 +116,9 @@ def whoami():
     mngr = manager.Manager()
     mngr.whoami()
 
+@main.command
+def summary():
+    """Summarise the status of all datasets"""
+    mngr = manager.Manager()
+    mngr.summary()
+

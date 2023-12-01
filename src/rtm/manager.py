@@ -6,7 +6,7 @@ import asyncio
 import json
 
 from sqlalchemy.orm import Session
-from sqlalchemy import Engine, create_engine, select
+from sqlalchemy import Engine, create_engine, select, func
 
 from rtm import model
 from rtm import config
@@ -76,9 +76,13 @@ class Manager:
         with Session(self.engine) as session:
             for dataset in session.scalars(stmt):
                 response = self.client.get_replication_rule(dataset.subscription)
+                dataset.ok_cnt = response['locks_ok_cnt']
+                dataset.replicating_cnt = response['locks_replicating_cnt']
+                dataset.stuck_cnt = response['locks_stuck_cnt']
                 if response["state"] == "OK":
+                    log.debug("Dataset %s ok", dataset.name)
                     dataset.transfered()
-                    session.commit()
+                session.commit()
 
     def verify(self, pattern: str) -> None:
         asyncio.run(self._verify(pattern))
@@ -113,10 +117,10 @@ class Manager:
             session.commit()
 
     async def _verify_file(self, lfn: str, checksum: int) -> None:
-        if lfn.index("Run2016") > 0:
+        if lfn.find("Run2016") > 0:
             url = f"root://eospublic.cern.ch//eos/opendata/cms/{lfn[12:]}"
         else:
-            url = f"root://eospublic.cern.ch//eos/opendata/cms/mc/{lfn[12:]}"
+            url = f"root://eospublic.cern.ch//eos/opendata/cms/mc/{lfn[10:]}"
 
         log.debug("url: %s", url)
         async with self.sem_xrdadler32:
@@ -126,7 +130,12 @@ class Manager:
             stdout, stderr = await proc.communicate()
 
         if proc.returncode != 0:
-            log.error("Return code %d from xrdadler32 %s, proc.returncode", url)
+            log.error("Return code %d from xrdadler32 %s", proc.returncode, url)
+        output = stdout.decode()
+        if output.startswith("Error_accessing"):
+           log.error("Error accessing %s", url)
+           return False
+
         checksum1 = int(stdout.decode().split()[0], 16)
         if checksum != checksum1:
             log.error("invalid checksum for %s", url)
@@ -149,15 +158,36 @@ class Manager:
                         copies=1,
                         rse_expression=rse_expression,
                     )
+                    dataset.subscribe()
+                    dataset.subscription = response[0]
+                    session.commit()
+                    log.info("Subscribed %s", dataset.name)
+
+                except rucio.common.exception.DuplicateRule:
+                    rules = list(
+                        self.client.list_replication_rules(
+                            {
+                                "scope": "cms",
+                                "name": dataset.name,
+                                "rse_expression": dataset.site,
+                            }
+                        )
+                    )
+                    if rules:
+                        log.info("Already subscribed %s", dataset.name)
+                        dataset.subscription = rules[0]["id"]
+                        dataset.ok_cnt = rules[0]['locks_ok_cnt']
+                        dataset.replicating_cnt = rules[0]['locks_replicating_cnt']
+                        dataset.stuck_cnt = rules[0]['locks_stuck_cnt']
+                        dataset.subscribe()
+                        session.commit()
+
+
                 except rucio.common.exception.RucioException as e:
                     log.exception("Error creating replication rule for %s", dataset.name)
                     dataset.error()
                     continue
 
-                dataset.subscribe()
-                dataset.subscription = response[0]
-                log.info("Subscribed %s", dataset.name)
-                session.commit()
 
     def add_datasets(self, datasets: list[str], site: str) -> None:
         asyncio.run(self._add_datasets(datasets, site))
@@ -228,3 +258,17 @@ class Manager:
         """Show rucio identity."""
         response = self.client.whoami()
         log.info("Rucio account: %s", response["account"])
+
+    def summary(self) -> None:
+        """Print summary of all datasets."""
+
+        with Session(self.engine) as session:
+            for status, count in session.query(model.Dataset.status, func.count(model.Dataset.status)).group_by(model.Dataset.status).all():
+                print(f"Datasets in state {status:12}: {count:6}")
+
+            number = session.query(func.count(model.Dataset.name)).one()
+            print(f"Number of datasets: {number[0]:10}")
+            number = session.query(func.count(model.File.lfn)).one()
+            print(f"Number of files   : {number[0]:10}")
+            number = session.query(func.sum(model.File.size)).one()
+            print(f"Size of files     :    {number[0]/(1000*1000*1000*1000):10.2f} TB")            
